@@ -122,6 +122,7 @@ void p2_h0PopCallback(void *ptr) {
   uint32_t nSpeed;
   p2_h0.getValue(&nSpeed);
   settings.dSpeed = nSpeed;
+  Serial.println(settings.dSpeed);
   EEWRITE(settings);
 }
 
@@ -172,6 +173,7 @@ void setup() {
   p1_m2.attachPop(p1_m2PopCallback);
   p1_m3.attachPush(p1_m3PushCallback);
   p1_m3.attachPop(p1_m3PopCallback);
+  p2_h0.attachPop(p2_h0PopCallback);
   p3_m0.attachPush(p3_m0PushCallback);
   p3_m1.attachPush(p3_m1PushCallback);
   p3_m2.attachPush(p3_m2PushCallback);
@@ -218,7 +220,7 @@ void stateMachine() {
     break;
 
     case JOG_DN_STATE:
-      if(digitalRead(PLATE_LIMIT_PIN) || digitalRead(LOWER_LIMIT_PIN)) {
+      if(digitalRead(PLATE_LIMIT_PIN) && digitalRead(LOWER_LIMIT_PIN)) {
         moveDrill(DOWN);
       }
     break;
