@@ -51,47 +51,58 @@ long encMax = 50000;
 #include <avr/eeprom.h>
 struct DrillConfig {
   uint32_t dSpeed = 300;
+  uint32_t jSpeed = 300;
   long uses = 0;
 } settings;
 
-void moveDrill(bool);
+void moveDrill(bool, uint32_t);
 void toggleWater(bool);
 void toggleDrill(bool);
 
 #include "Nextion.h"
+#define nexPrint(str) \
+  Serial.print(str); \
+  Serial.write(0xff); \
+  Serial.write(0xff); \
+  Serial.write(0xff);
 
 // Main Screen
-NexButton p0_b0 = NexButton(0, 3, "b0");
+NexButton p0_b0 = NexButton(0, 2, "b0");
+NexHotspot p0_m0 = NexHotspot(0, 1, "m0");
 
 // Debug Screen
-NexButton p1_b0 = NexButton(1, 3, "b0");
-NexButton p1_b1 = NexButton(1, 4, "b1");
-NexHotspot p1_m2 = NexHotspot(1, 5, "m2");
-NexHotspot p1_m3 = NexHotspot(1, 6, "m3");
-
-// Settings Screen
-NexSlider p2_h0 = NexSlider(2, 3, "h0");
+NexButton p1_b0 = NexButton(1, 2, "b0");
+NexButton p1_b1 = NexButton(1, 3, "b1");
+NexHotspot p1_m2 = NexHotspot(1, 4, "m2");
+NexHotspot p1_m3 = NexHotspot(1, 5, "m3");
+NexSlider p1_h0 = NexSlider(1, 6, "h0");
+NexSlider p1_h1 = NexSlider(1, 7, "h1");
 
 // Run Screen
-NexHotspot p3_m0 = NexHotspot(3, 1, "m0");
-NexHotspot p3_m1 = NexHotspot(3, 2, "m1");
-NexHotspot p3_m2 = NexHotspot(3, 3, "m2");
+NexHotspot p2_m0 = NexHotspot(3, 1, "m0");
+NexHotspot p2_m1 = NexHotspot(3, 2, "m1");
+NexHotspot p2_m2 = NexHotspot(3, 3, "m2");
 
 NexTouch *nex_listen_list[] = {
   &p0_b0,
+  &p0_m0,
   &p1_b0,
   &p1_b1,
   &p1_m2,
   &p1_m3,
-  &p2_h0,
-  &p3_m0,
-  &p3_m1,
-  &p3_m2,
+  &p1_h0,
+  &p1_h1,
+  &p2_m2,
   NULL
 };
 
 void p0_b0PushCallback(void *ptr) {
   state = SETUP_STATE;
+}
+
+void p0_m0PushCallback(void *ptr) {
+  p1_h0.setValue(settings.dSpeed);
+  p1_h1.setValue(settings.jSpeed);
 }
 
 void p1_b0PushCallback(void *ptr) {
@@ -118,21 +129,21 @@ void p1_m3PopCallback(void *ptr) {
   state = IDLE_STATE;
 }
 
-void p2_h0PopCallback(void *ptr) {
+void p1_h0PopCallback(void *ptr) {
   uint32_t nSpeed;
-  p2_h0.getValue(&nSpeed);
+  p1_h0.getValue(&nSpeed);
   settings.dSpeed = nSpeed;
-  Serial.println(settings.dSpeed);
   EEWRITE(settings);
 }
 
-void p3_m0PushCallback(void *ptr) {
+void p1_h1PopCallback(void *ptr) {
+  uint32_t nSpeed;
+  p1_h0.getValue(&nSpeed);
+  settings.jSpeed = nSpeed;
+  EEWRITE(settings);
 }
 
-void p3_m1PushCallback(void *ptr) {
-}
-
-void p3_m2PushCallback(void *ptr) {
+void p2_m2PushCallback(void *ptr) {
   state = STOP_STATE; 
 }
 
@@ -167,16 +178,16 @@ void setup() {
   Serial2.write(0xFF);
   
   p0_b0.attachPush(p0_b0PushCallback);
+  p0_m0.attachPush(p0_m0PushCallback);
   p1_b0.attachPush(p1_b0PushCallback);
   p1_b1.attachPush(p1_b1PushCallback);
   p1_m2.attachPush(p1_m2PushCallback);
   p1_m2.attachPop(p1_m2PopCallback);
   p1_m3.attachPush(p1_m3PushCallback);
   p1_m3.attachPop(p1_m3PopCallback);
-  p2_h0.attachPop(p2_h0PopCallback);
-  p3_m0.attachPush(p3_m0PushCallback);
-  p3_m1.attachPush(p3_m1PushCallback);
-  p3_m2.attachPush(p3_m2PushCallback);
+  p1_h0.attachPop(p1_h0PopCallback);
+  p1_h1.attachPop(p1_h0PopCallback);
+  p2_m2.attachPush(p2_m2PushCallback);
 
   delay(3000); 
 }
@@ -186,14 +197,14 @@ void setup() {
 void isrA() { encPos += (readA != readB) ? 1 : -1; }
 void isrB() { encPos += (readA == readB) ? 1 : -1; }
 
-void moveDrill(bool dir) {
+void moveDrill(bool dir, uint32_t spd) {
   digitalWrite(DIR_PIN, dir);
 
   digitalWrite(PUL_PIN, HIGH);
-  delayMicroseconds(settings.dSpeed);
+  delayMicroseconds(spd);
 
   digitalWrite(PUL_PIN, LOW);   
-  delayMicroseconds(settings.dSpeed); 
+  delayMicroseconds(spd); 
 }
 
 void toggleDrill(bool toggle) {
@@ -215,13 +226,13 @@ void stateMachine() {
 
     case JOG_UP_STATE:
       if(digitalRead(UPPER_LIMIT_PIN)) {
-        moveDrill(UP);
+        moveDrill(UP, settings.jSpeed);
       }
     break;
 
     case JOG_DN_STATE:
       if(digitalRead(PLATE_LIMIT_PIN) && digitalRead(LOWER_LIMIT_PIN)) {
-        moveDrill(DOWN);
+        moveDrill(DOWN, settings.jSpeed);
       }
     break;
     
@@ -230,7 +241,7 @@ void stateMachine() {
         encPos = 0;
         state = nextState;
       } else {
-        moveDrill(UP);
+        moveDrill(UP, settings.dSpeed);
       }
     break;
       
@@ -252,7 +263,7 @@ void stateMachine() {
         Serial.println(encDis);
         state = RETURN_STATE;
       } else {
-        moveDrill(DOWN);
+        moveDrill(DOWN, settings.dSpeed);
       }
     break;
       
@@ -276,7 +287,7 @@ void stateMachine() {
         delay(1);
 				state = HOLD_STATE;
 			} else {
-				moveDrill(DOWN);
+				moveDrill(DOWN, settings.dSpeed);
 			}
     break;
 
@@ -297,13 +308,16 @@ void stateMachine() {
       if(encPos <= encDis) {
         state = RUN_STATE;
       } else {
-				moveDrill(UP);
+				moveDrill(UP, settings.dSpeed);
 			}
     break;
       
     case STOP_STATE:
       toggleDrill(OFF);
       toggleWater(OFF);
+
+      nexPrint("page 0");
+      
       state = IDLE_STATE;
     break;
       
