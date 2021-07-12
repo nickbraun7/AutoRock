@@ -61,10 +61,10 @@ void toggleDrill(bool);
 
 #include "Nextion.h"
 #define nexPrint(str) \
-  Serial.print(str); \
-  Serial.write(0xff); \
-  Serial.write(0xff); \
-  Serial.write(0xff);
+  Serial2.print(str); \
+  Serial2.write(0xff); \
+  Serial2.write(0xff); \
+  Serial2.write(0xff);
 
 // Main Screen
 NexButton p0_b0 = NexButton(0, 2, "b0");
@@ -132,13 +132,15 @@ void p1_m3PopCallback(void *ptr) {
 void p1_h0PopCallback(void *ptr) {
   uint32_t nSpeed;
   p1_h0.getValue(&nSpeed);
+  Serial.println(nSpeed);
   settings.dSpeed = nSpeed;
   EEWRITE(settings);
 }
 
 void p1_h1PopCallback(void *ptr) {
   uint32_t nSpeed;
-  p1_h0.getValue(&nSpeed);
+  p1_h1.getValue(&nSpeed);
+  Serial.println(nSpeed);
   settings.jSpeed = nSpeed;
   EEWRITE(settings);
 }
@@ -186,7 +188,7 @@ void setup() {
   p1_m3.attachPush(p1_m3PushCallback);
   p1_m3.attachPop(p1_m3PopCallback);
   p1_h0.attachPop(p1_h0PopCallback);
-  p1_h1.attachPop(p1_h0PopCallback);
+  p1_h1.attachPop(p1_h1PopCallback);
   p2_m2.attachPush(p2_m2PushCallback);
 
   delay(3000); 
