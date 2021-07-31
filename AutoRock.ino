@@ -60,91 +60,95 @@ void toggleWater(bool);
 void toggleDrill(bool);
 
 #include "Nextion.h"
-#define nexPrint(str) \
-  Serial.print(str); \
-  Serial.write(0xff); \
-  Serial.write(0xff); \
-  Serial.write(0xff);
+#define nexClear() \
+  Serial2.write(0xff); \
+  Serial2.write(0xff); \
+  Serial2.write(0xff);
 
 // Main Screen
-NexButton p0_b0 = NexButton(0, 2, "b0");
-NexHotspot p0_m0 = NexHotspot(0, 1, "m0");
-
-// Debug Screen
-NexButton p1_b0 = NexButton(1, 2, "b0");
-NexButton p1_b1 = NexButton(1, 3, "b1");
-NexHotspot p1_m2 = NexHotspot(1, 4, "m2");
-NexHotspot p1_m3 = NexHotspot(1, 5, "m3");
-NexSlider p1_h0 = NexSlider(1, 6, "h0");
-NexSlider p1_h1 = NexSlider(1, 7, "h1");
-
-// Run Screen
-NexHotspot p2_m0 = NexHotspot(3, 1, "m0");
-NexHotspot p2_m1 = NexHotspot(3, 2, "m1");
-NexHotspot p2_m2 = NexHotspot(3, 3, "m2");
+NexSlider  main_h0 = NexSlider(1, 1, "h0");
+NexSlider  main_h1 = NexSlider(1, 2, "h1");
+NexHotspot main_m0 = NexHotspot(0, 3, "m0");
+NexHotspot main_m1 = NexHotspot(0, 4, "m1");
+NexHotspot main_m2 = NexHotspot(0, 5, "m2");
+NexHotspot main_m3 = NexHotspot(0, 6, "m3");
+NexHotspot main_m4 = NexHotspot(0, 7, "m4");
+NexHotspot main_m5 = NexHotspot(0, 8, "m5");
+NexHotspot main_m6 = NexHotspot(0, 9, "m6");
 
 NexTouch *nex_listen_list[] = {
-  &p0_b0,
-  &p0_m0,
-  &p1_b0,
-  &p1_b1,
-  &p1_m2,
-  &p1_m3,
-  &p1_h0,
-  &p1_h1,
-  &p2_m2,
+  &main_h0,
+  &main_h1,
+  &main_m0,
+  &main_m1,
+  &main_m2,
+  &main_m3,
+  &main_m4,
+  &main_m5,
+  &main_m6,
   NULL
 };
 
-void p0_b0PushCallback(void *ptr) {
-  state = SETUP_STATE;
-}
-
-void p0_m0PushCallback(void *ptr) {
-  p1_h0.setValue(settings.dSpeed);
-  p1_h1.setValue(settings.jSpeed);
-}
-
-void p1_b0PushCallback(void *ptr) {
-  toggleDrill(!digitalRead(DRILL_RELAY_PIN));
-}
-
-void p1_b1PushCallback(void *ptr) {
-  toggleWater(!digitalRead(WATER_RELAY_PIN));
-}
-
-void p1_m2PushCallback(void *ptr) {
-  state = JOG_UP_STATE;
-}
-
-void p1_m2PopCallback(void *ptr) {
-  state = IDLE_STATE;
-}
-
-void p1_m3PushCallback(void *ptr) {
-  state = JOG_DN_STATE;  
-}
-
-void p1_m3PopCallback(void *ptr) {
-  state = IDLE_STATE;
-}
-
-void p1_h0PopCallback(void *ptr) {
+void main_h0PopCallback(void *ptr) {
   uint32_t nSpeed;
-  p1_h0.getValue(&nSpeed);
+  main_h0.getValue(&nSpeed);
   settings.dSpeed = nSpeed;
   EEWRITE(settings);
 }
 
-void p1_h1PopCallback(void *ptr) {
+void main_h1PopCallback(void *ptr) {
   uint32_t nSpeed;
-  p1_h0.getValue(&nSpeed);
+  main_h1.getValue(&nSpeed);
   settings.jSpeed = nSpeed;
   EEWRITE(settings);
 }
 
-void p2_m2PushCallback(void *ptr) {
-  state = STOP_STATE; 
+void main_m0PushCallback(void *ptr) {
+  state = STOP_STATE;
+}
+
+void main_m1PushCallback(void *ptr) {
+  state = SETUP_STATE;
+}
+
+void main_m2PushCallback(void *ptr) {
+  state = ERROR_STATE;
+}
+
+void main_m3PushCallback(void *ptr) {
+  if(state ==IDLE_STATE) {
+    toggleWater(!digitalRead(WATER_RELAY_PIN));
+  }
+}
+
+void main_m4PushCallback(void *ptr) {
+  if(state == IDLE_STATE) {
+    toggleDrill(!digitalRead(DRILL_RELAY_PIN));
+  }
+}
+
+void main_m5PushCallback(void *ptr) {
+  if(state == IDLE_STATE) {
+    state = JOG_UP_STATE;
+  }
+}
+
+void main_m5PopCallback(void *ptr) {
+  if(state == JOG_UP_STATE) {
+    state = IDLE_STATE;
+  }
+}
+
+void main_m6PushCallback(void *ptr) {
+  if(state == IDLE_STATE) {
+    state = JOG_DN_STATE;  
+  }
+}
+
+void main_m6PopCallback(void *ptr) {
+  if(state == JOG_DN_STATE) {
+    state = IDLE_STATE;
+  }
 }
 
 void setup() {
@@ -173,23 +177,22 @@ void setup() {
   Serial.begin(9600);
 
   Serial2.begin(9600);
-  Serial2.write(0xFF);
-  Serial2.write(0xFF);
-  Serial2.write(0xFF);
-  
-  p0_b0.attachPush(p0_b0PushCallback);
-  p0_m0.attachPush(p0_m0PushCallback);
-  p1_b0.attachPush(p1_b0PushCallback);
-  p1_b1.attachPush(p1_b1PushCallback);
-  p1_m2.attachPush(p1_m2PushCallback);
-  p1_m2.attachPop(p1_m2PopCallback);
-  p1_m3.attachPush(p1_m3PushCallback);
-  p1_m3.attachPop(p1_m3PopCallback);
-  p1_h0.attachPop(p1_h0PopCallback);
-  p1_h1.attachPop(p1_h0PopCallback);
-  p2_m2.attachPush(p2_m2PushCallback);
+  nexClear();
 
-  delay(3000); 
+  main_h0.setValue(settings.dSpeed);
+  main_h1.setValue(settings.jSpeed);
+  
+  main_h0.attachPop(main_h0PopCallback);
+  main_h1.attachPop(main_h1PopCallback);
+  main_m0.attachPush(main_m0PushCallback);
+  main_m1.attachPush(main_m1PushCallback);
+  main_m2.attachPush(main_m2PushCallback);
+  main_m3.attachPush(main_m3PushCallback);
+  main_m4.attachPush(main_m4PushCallback);
+  main_m5.attachPush(main_m5PushCallback);
+  main_m5.attachPop(main_m5PopCallback);
+  main_m6.attachPush(main_m6PushCallback);
+  main_m6.attachPop(main_m6PopCallback); 
 }
 
 #define readA digitalRead(ENC_A_PIN)
@@ -219,6 +222,11 @@ void stateMachine() {
   switch(state) {
     case INIT_STATE:   
       state = IDLE_STATE;
+      
+      delay(3000);
+
+      Serial2.print("main");
+      nexClear();
     break;
       
     case IDLE_STATE:               
@@ -315,8 +323,6 @@ void stateMachine() {
     case STOP_STATE:
       toggleDrill(OFF);
       toggleWater(OFF);
-
-      nexPrint("page 0");
       
       state = IDLE_STATE;
     break;
