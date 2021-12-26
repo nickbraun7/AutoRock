@@ -1,3 +1,5 @@
+#include "screen.h"
+
 /* Pin Definition */
 #define ENC_A_PIN 2
 #define ENC_B_PIN 3
@@ -40,7 +42,7 @@
 #define EEWRITE(struc) eeprom_write_block((const void*)&struc, (void*)0, sizeof(struc))
 
 /* Variable Declaration */
-int state = INIT_STATE;
+int currState = INIT_STATE;
 int nextState = NULL;
 
 int cycleCount = 0;
@@ -58,104 +60,9 @@ struct DrillConfig {
   long uses = 0;
 } settings;
 
-void moveDrill(bool, uint32_t);
-void toggleWater(bool);
-void toggleDrill(bool);
-
-#include "Nextion.h"
-#define nexClear() \
-  Serial2.write(0xff); \
-  Serial2.write(0xff); \
-  Serial2.write(0xff);
-
-// Main Screen
-NexPage p0 = NexPage(0, 0, "init");
-NexPage p1 = NexPage(1, 0, "main");
-
-NexSlider  p1_h0 = NexSlider(1, 1, "h0");
-NexSlider  p1_h1 = NexSlider(1, 2, "h1");
-NexHotspot p1_m0 = NexHotspot(1, 3, "m0");
-NexHotspot p1_m1 = NexHotspot(1, 4, "m1");
-NexHotspot p1_m2 = NexHotspot(1, 5, "m2");
-NexHotspot p1_m3 = NexHotspot(1, 6, "m3");
-NexHotspot p1_m4 = NexHotspot(1, 7, "m4");
-NexHotspot p1_m5 = NexHotspot(1, 8, "m5");
-NexHotspot p1_m6 = NexHotspot(1, 9, "m6");
-
-NexTouch *nex_listen_list[] = {
-  &p1_h0,
-  &p1_h1,
-  &p1_m0,
-  &p1_m1,
-  &p1_m2,
-  &p1_m3,
-  &p1_m4,
-  &p1_m5,
-  &p1_m6,
-  NULL
-};
-
-void p1_h0PopCallback(void *ptr) {
-  uint32_t nSpeed;
-  p1_h0.getValue(&nSpeed);
-  settings.jSpeed = nSpeed;
-  EEWRITE(settings);
-}
-
-void p1_h1PopCallback(void *ptr) {
-  uint32_t nSpeed;
-  p1_h1.getValue(&nSpeed);
-  settings.dSpeed = nSpeed;
-  EEWRITE(settings);
-}
-
-void p1_m0PushCallback(void *ptr) {
-  state = STOP_STATE;
-}
-
-void p1_m1PushCallback(void *ptr) {
-  state = SETUP_STATE;
-}
-
-void p1_m2PushCallback(void *ptr) {
-  state = ERROR_STATE;
-}
-
-void p1_m3PushCallback(void *ptr) {
-  if(state ==IDLE_STATE) {
-    toggleWater(!digitalRead(WATER_RELAY_PIN));
-  }
-}
-
-void p1_m4PushCallback(void *ptr) {
-  if(state == IDLE_STATE) {
-    toggleDrill(!digitalRead(DRILL_RELAY_PIN));
-  }
-}
-
-void p1_m5PushCallback(void *ptr) {
-  if(state == IDLE_STATE) {
-    state = JOG_UP_STATE;
-  }
-}
-
-void p1_m5PopCallback(void *ptr) {
-  if(state == JOG_UP_STATE) {
-    state = IDLE_STATE;
-  }
-}
-
-void p1_m6PushCallback(void *ptr) {
-  if(state == IDLE_STATE) {
-    state = JOG_DN_STATE;  
-  }
-}
-
-void p1_m6PopCallback(void *ptr) {
-  if(state == JOG_DN_STATE) {
-    state = IDLE_STATE;
-  }
-}
+void move_drill(bool, uint32_t);
+void toggle_water(bool);
+void toggle_drill(bool);
 
 void setup() {
   pinMode(ENC_A_PIN, INPUT_PULLUP);
@@ -168,8 +75,8 @@ void setup() {
   
   pinMode(WATER_RELAY_PIN, OUTPUT);
   pinMode(DRILL_RELAY_PIN, OUTPUT);
-  toggleDrill(OFF);
-  toggleWater(OFF);
+  toggle_drill(OFF);
+  toggle_water(OFF);
 
   pinMode(UPPER_LIMIT_PIN, INPUT);
   pinMode(LOWER_LIMIT_PIN, INPUT);
@@ -183,21 +90,7 @@ void setup() {
   Serial.begin(9600);
 
   Serial2.begin(9600);
-  nexClear();
-
-
-  
-  p1_h0.attachPop(p1_h0PopCallback);
-  p1_h1.attachPop(p1_h1PopCallback);
-  p1_m0.attachPush(p1_m0PushCallback);
-  p1_m1.attachPush(p1_m1PushCallback);
-  p1_m2.attachPush(p1_m2PushCallback);
-  p1_m3.attachPush(p1_m3PushCallback);
-  p1_m4.attachPush(p1_m4PushCallback);
-  p1_m5.attachPush(p1_m5PushCallback);
-  p1_m5.attachPop(p1_m5PopCallback);
-  p1_m6.attachPush(p1_m6PushCallback);
-  p1_m6.attachPop(p1_m6PopCallback); 
+  screen_init();
 }
 
 #define readA digitalRead(ENC_A_PIN)
@@ -205,7 +98,7 @@ void setup() {
 void isrA() { encPos += (readA != readB) ? 1 : -1; }
 void isrB() { encPos += (readA == readB) ? 1 : -1; }
 
-void moveDrill(bool dir, uint32_t spd) {
+void move_drill(bool dir, uint32_t spd) {
   digitalWrite(DIR_PIN, dir);
 
   digitalWrite(PUL_PIN, HIGH);
@@ -215,140 +108,130 @@ void moveDrill(bool dir, uint32_t spd) {
   delayMicroseconds(spd); 
 }
 
-void toggleDrill(bool toggle) {
+void toggle_drill(bool toggle) {
   digitalWrite(DRILL_RELAY_PIN, toggle); 
 }
 
-void toggleWater(bool toggle) {
+void toggle_water(bool toggle) {
   digitalWrite(WATER_RELAY_PIN, toggle); 
 }
 
-void stateMachine() {
-  switch(state) {
-    case INIT_STATE:   
-      state = IDLE_STATE;
-      
+void loop() {
+  if(digitalRead(ESTOP_PIN)) {
+    currState = ERROR_STATE;
+  } else if(currState == ERROR_STATE) {
+    currState = IDLE_STATE;
+  }
+
+  bool low_limit = digitalRead(LOWER_LIMIT_PIN);
+  bool upp_limit = digitalRead(UPPER_LIMIT_PIN);
+  bool plate = digitalRead(PLATE_LIMIT_PIN);
+
+  switch(currState) {
+    case  INIT_STATE: 
+      currState = IDLE_STATE;
       delay(2000);
 
       p1.show();
       p1_h0.setValue(settings.jSpeed);
       p1_h1.setValue(settings.dSpeed);
-    break;
-      
-    case IDLE_STATE:               
-    break;
+    case  IDLE_STATE: 
+      break;
 
-    case JOG_UP_STATE:
-      if(digitalRead(UPPER_LIMIT_PIN)) {
-        moveDrill(UP, settings.jSpeed);
+    case JOG_UP_STATE: 
+      if(upp_limit) { 
+        move_drill(UP, settings.jSpeed);
       }
-    break;
+      break;
 
-    case JOG_DN_STATE:
-      if(digitalRead(PLATE_LIMIT_PIN) && digitalRead(LOWER_LIMIT_PIN)) {
-        moveDrill(DOWN, settings.jSpeed);
+    case JOG_DN_STATE: 
+      if(plate && low_limit) {
+        move_drill(DOWN, settings.jSpeed);
       }
-    break;
+      break;
     
     case HOME_STATE:
-      if(!digitalRead(UPPER_LIMIT_PIN)) {
+      if(!upp_limit) {
         encPos = 0;
-        state = nextState;
+        currState = nextState;
       } else {
-        moveDrill(UP, settings.dSpeed);
+        move_drill(UP, settings.dSpeed);
       }
-    break;
+      break;
       
-    case SETUP_STATE:
-      toggleDrill(OFF);
-      toggleWater(OFF);
-			nextState = START_STATE;
-      state = HOME_STATE;
-    break;
+    case SETUP_STATE: 
+      toggle_drill(OFF);
+      toggle_water(OFF);
+      nextState = START_STATE;
+      currState = HOME_STATE;
+      break;
       
-    case START_STATE: 
-      if(!digitalRead(LOWER_LIMIT_PIN) || (encPos >= encMax)) {
-				state = STOP_STATE;
-				break;
-			}
+    case START_STATE:
+      if(!(low_limit) || (encPos >= encMax)) {
+        currState = STOP_STATE;
+        break;
+      }
 
-      if(!digitalRead(PLATE_LIMIT_PIN)) {
+      if(!(plate)) {
         encDis = encPos - ENC_DIS;
         Serial.println(encDis);
-        state = RETURN_STATE;
+        currState = RETURN_STATE;
       } else {
-        moveDrill(DOWN, settings.dSpeed);
+        move_drill(DOWN, settings.dSpeed);
       }
-    break;
-      
+      break;
+
     case RUN_STATE:
-      if(!digitalRead(LOWER_LIMIT_PIN) || (encPos >= encMax)) {
-        toggleDrill(OFF);
-        toggleWater(OFF);
+      if(!(low_limit) || (encPos >= encMax)) {
+        toggle_drill(OFF);
+        toggle_water(OFF);
 
         settings.uses += 1;
         EEWRITE(settings);
         
         nextState = IDLE_STATE;
-        state = HOME_STATE;
+        currState = HOME_STATE;
 		    break;
 			}
 
-			toggleDrill(ON);
-      toggleWater(ON);
+			toggle_drill(ON);
+      toggle_water(ON);
 
-			if(!digitalRead(PLATE_LIMIT_PIN)) {
+			if(!(plate)) {
         delay(10);
-				state = HOLD_STATE;
+				currState = HOLD_STATE;
 			} else {
-				moveDrill(DOWN, settings.dSpeed);
+				move_drill(DOWN, settings.dSpeed);
 			}
-    break;
+      break;
 
 		case HOLD_STATE:
-			if(cycleCount++ < HOLD_TIMEOUT && !digitalRead(PLATE_LIMIT_PIN)) {
-				break;
-			} else {
-        cycleCount = 0;
-        state = RETURN_STATE;
-			}
-	  break;
+			if(cycleCount++ < HOLD_TIMEOUT && !(plate)) {
+        break;
+      }
+      cycleCount = 0;
+      currState = RETURN_STATE;
+	    break;
 
 		case RETURN_STATE:
-      if(!digitalRead(UPPER_LIMIT_PIN)) {
-        state = STOP_STATE;
+      if(!(upp_limit)) {
+        currState = STOP_STATE;
 				break;
       }
 
       if(encPos <= encDis) {
-        state = RUN_STATE;
+        currState = RUN_STATE;
       } else {
-				moveDrill(UP, settings.dSpeed);
+				move_drill(UP, settings.dSpeed);
 			}
-    break;
-      
-    case STOP_STATE:
-      toggleDrill(OFF);
-      toggleWater(OFF);
-      
-      state = IDLE_STATE;
-    break;
-      
-    case ERROR_STATE:
-      toggleDrill(OFF);
-      toggleWater(OFF);
-    break;
-  }
-}
+      break;
 
-void loop() {
-  if(digitalRead(ESTOP_PIN)) {
-    state = ERROR_STATE;
-  } else if(state == ERROR_STATE) {
-    state = IDLE_STATE;
+    case STOP_STATE: 
+      currState = IDLE_STATE;
+    case ERROR_STATE: 
+      toggle_drill(OFF);
+      toggle_water(OFF);
   }
-
-  stateMachine();
   
   nexLoop(nex_listen_list);
 }
