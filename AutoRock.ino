@@ -1,5 +1,3 @@
-#include "screen.h"
-
 /* Pin Definition */
 #define ENC_A_PIN 2
 #define ENC_B_PIN 3
@@ -38,31 +36,115 @@
 #define   STOP_STATE 10
 #define  ERROR_STATE 11
 
-#define EEREAD(struc) eeprom_read_block((void*)&struc, (void*)0, sizeof(struc))
-#define EEWRITE(struc) eeprom_write_block((const void*)&struc, (void*)0, sizeof(struc))
-
 /* Variable Declaration */
-int currState = INIT_STATE;
-int nextState = NULL;
-
-int cycleCount = 0;
-#define HOLD_TIMEOUT 30
+uint16_t currState = INIT_STATE;
+uint16_t nextState = NULL;
 
 #define ENC_DIS 6000
 volatile long encPos = 0;
 long encDis = 0;
 long encMax = 50000; 
 
+int currDwell = 0;
+
+#define CYCLE_COUNT 5
+int currCycle = 0;
+
+/* EEPROM Definition */
 #include <avr/eeprom.h>
+#define EEREAD(struc) eeprom_read_block((void*)&struc, (void*)0, sizeof(struc))
+#define EEWRITE(struc) eeprom_write_block((const void*)&struc, (void*)0, sizeof(struc))
+
 struct DrillConfig {
   uint32_t dSpeed = 300;
   uint32_t jSpeed = 300;
-  long uses = 0;
+  uint32_t dwellTime = 100;
 } settings;
 
 void move_drill(bool, uint32_t);
 void toggle_water(bool);
 void toggle_drill(bool);
+
+#include "Nextion.h"
+
+#define nexClear() \
+  Serial2.write(0xff); \
+  Serial2.write(0xff); \
+  Serial2.write(0xff);
+
+NexPage p0 = NexPage(0, 0, "init");
+NexPage p1 = NexPage(1, 0, "main");
+
+NexSlider  p1_h0 = NexSlider(1, 1, "h0");
+NexSlider  p1_h1 = NexSlider(1, 2, "h1");
+NexSlider  p1_h2 = NexSlider(1, 10, "h2");
+NexHotspot p1_m0 = NexHotspot(1, 3, "m0");
+NexHotspot p1_m1 = NexHotspot(1, 4, "m1");
+NexHotspot p1_m2 = NexHotspot(1, 5, "m2");
+NexHotspot p1_m3 = NexHotspot(1, 6, "m3");
+NexHotspot p1_m4 = NexHotspot(1, 7, "m4");
+NexHotspot p1_m5 = NexHotspot(1, 8, "m5");
+NexHotspot p1_m6 = NexHotspot(1, 9, "m6");
+
+NexTouch *nex_listen_list[] = {
+  &p1_h0,
+  &p1_h1,
+  &p1_m0,
+  &p1_m1,
+  &p1_m2,
+  &p1_m3,
+  &p1_m4,
+  &p1_m5,
+  &p1_m6,
+  NULL
+};
+
+void p1_h0PopCallback(void *ptr) {
+  uint32_t nSpeed;
+  p1_h0.getValue(&nSpeed);
+  settings.jSpeed = nSpeed;
+  EEWRITE(settings);
+}
+
+void p1_h1PopCallback(void *ptr) {
+  uint32_t nSpeed;
+  p1_h1.getValue(&nSpeed);
+  settings.dSpeed = nSpeed;
+  EEWRITE(settings);
+}
+
+void p1_h2PopCallback(void *ptr) {
+  uint32_t dTime;
+  p1_h1.getValue(&dTime);
+  settings.dSpeed = dTime;
+  EEWRITE(settings);
+}
+
+void p1_m0PushCallback(void *ptr) { currState = STOP_STATE; }
+void p1_m1PushCallback(void *ptr) { currState = SETUP_STATE; }
+void p1_m2PushCallback(void *ptr) { currState = ERROR_STATE; }
+void p1_m3PushCallback(void *ptr) { if(currState ==IDLE_STATE) toggleWater(!digitalRead(WATER_RELAY_PIN)); }
+void p1_m4PushCallback(void *ptr) { if(currState == IDLE_STATE) toggleDrill(!digitalRead(DRILL_RELAY_PIN)); }
+void p1_m5PushCallback(void *ptr) { if(currState == IDLE_STATE) currState = JOG_UP_STATE; }
+void p1_m5PopCallback(void *ptr) { if(currState == JOG_UP_STATE) currState = IDLE_STATE; }
+void p1_m6PushCallback(void *ptr) { if(currState == IDLE_STATE) currState = JOG_DN_STATE; }
+void p1_m6PopCallback(void *ptr) { if(currState == JOG_DN_STATE) currState = IDLE_STATE; }
+
+void screen_init() {
+  nexClear();
+
+  p1_h0.attachPop(p1_h0PopCallback);
+  p1_h1.attachPop(p1_h1PopCallback);
+  p1_m0.attachPush(p1_m0PushCallback);
+  p1_m1.attachPush(p1_m1PushCallback);
+  p1_m2.attachPush(p1_m2PushCallback);
+  p1_m3.attachPush(p1_m3PushCallback);
+  p1_m4.attachPush(p1_m4PushCallback);
+  p1_m5.attachPush(p1_m5PushCallback);
+  p1_m5.attachPop(p1_m5PopCallback);
+  p1_m6.attachPush(p1_m6PushCallback);
+  p1_m6.attachPop(p1_m6PopCallback); 
+}
 
 void setup() {
   pinMode(ENC_A_PIN, INPUT_PULLUP);
@@ -108,13 +190,11 @@ void move_drill(bool dir, uint32_t spd) {
   delayMicroseconds(spd); 
 }
 
-void toggle_drill(bool toggle) {
-  digitalWrite(DRILL_RELAY_PIN, toggle); 
-}
-
-void toggle_water(bool toggle) {
-  digitalWrite(WATER_RELAY_PIN, toggle); 
-}
+#define getLow digitalRead(LOWER_LIMIT_PIN);
+#define getUpp digitalRead(UPPER_LIMIT_PIN);
+#define getPlate digitalRead(PLATE_LIMIT_PIN);
+void toggle_drill(bool toggle) { digitalWrite(DRILL_RELAY_PIN, toggle); }
+void toggle_water(bool toggle) { digitalWrite(WATER_RELAY_PIN, toggle); }
 
 void loop() {
   if(digitalRead(ESTOP_PIN)) {
@@ -123,114 +203,103 @@ void loop() {
     currState = IDLE_STATE;
   }
 
-  bool low_limit = digitalRead(LOWER_LIMIT_PIN);
-  bool upp_limit = digitalRead(UPPER_LIMIT_PIN);
-  bool plate = digitalRead(PLATE_LIMIT_PIN);
+  if(currState == INIT_STATE) {
+    currState = IDLE_STATE;
+    delay(2000);
 
-  switch(currState) {
-    case  INIT_STATE: 
-      currState = IDLE_STATE;
-      delay(2000);
+    p1.show();
+    p1_h0.setValue(settings.jSpeed);
+    p1_h1.setValue(settings.dSpeed);
+  } 
+  else if(currState == IDLE_STATE) {
+    ;
+  } 
+  else if(currState == JOG_UP_STATE) {
+    if(getUpp) move_drill(UP, settings.jSpeed);
+  } 
+  else if(currState == JOG_DN_STATE) {
+    if(getLow) move_drill(DOWN, settings.jSpeed);
+  } 
+  else if(currState == HOME_STATE) {
+    if(!getUpp) {
+      encPos = 0;
+      currState = nextState;
+    } else {
+      move_drill(UP, settings.dSpeed);
+    }
+  }
+  else if(currState == SETUP_STATE) {
+    toggle_drill(OFF);
+    toggle_water(OFF);
+    nextState = START_STATE;
+    currState = HOME_STATE;
+  }
+  else if(currState == START_STATE) {
+    if(!getLow || (encPos >= encMax)) {
+      currState = STOP_STATE;
+      break;
+    }
 
-      p1.show();
-      p1_h0.setValue(settings.jSpeed);
-      p1_h1.setValue(settings.dSpeed);
-    case  IDLE_STATE: 
-      break;
-
-    case JOG_UP_STATE: 
-      if(upp_limit) { 
-        move_drill(UP, settings.jSpeed);
-      }
-      break;
-
-    case JOG_DN_STATE: 
-      if(plate && low_limit) {
-        move_drill(DOWN, settings.jSpeed);
-      }
-      break;
-    
-    case HOME_STATE:
-      if(!upp_limit) {
-        encPos = 0;
-        currState = nextState;
-      } else {
-        move_drill(UP, settings.dSpeed);
-      }
-      break;
-      
-    case SETUP_STATE: 
+    if(!getPlate) {
+      encDis = encPos - ENC_DIS;
+      currState = RETURN_STATE;
+    } else {
+      move_drill(DOWN, settings.dSpeed);
+    }
+  }
+  else if(currState == RUN_STATE) {
+    if(!getLow || (encPos >= encMax)) {
       toggle_drill(OFF);
       toggle_water(OFF);
-      nextState = START_STATE;
+      
+      nextState = IDLE_STATE;
       currState = HOME_STATE;
       break;
-      
-    case START_STATE:
-      if(!(low_limit) || (encPos >= encMax)) {
-        currState = STOP_STATE;
-        break;
-      }
+    }
 
-      if(!(plate)) {
-        encDis = encPos - ENC_DIS;
-        Serial.println(encDis);
-        currState = RETURN_STATE;
-      } else {
-        move_drill(DOWN, settings.dSpeed);
-      }
+    toggle_drill(ON);
+    toggle_water(ON);
+
+    if(!getPlate) {
+      move_drill(DOWN, settings.dSpeed);
+      delay(100);
+      currState = HOLD_STATE;
+    } else {
+      move_drill(DOWN, settings.dSpeed);
+    }
+  }
+  else if(currState == HOLD_STATE) {
+    if(currDwell++ < settings.dwellTime && !getPlate) {
+      delay(100);
       break;
-
-    case RUN_STATE:
-      if(!(low_limit) || (encPos >= encMax)) {
-        toggle_drill(OFF);
-        toggle_water(OFF);
-
-        settings.uses += 1;
-        EEWRITE(settings);
-        
-        nextState = IDLE_STATE;
-        currState = HOME_STATE;
-		    break;
-			}
-
-			toggle_drill(ON);
-      toggle_water(ON);
-
-			if(!(plate)) {
-        delay(10);
-				currState = HOLD_STATE;
-			} else {
-				move_drill(DOWN, settings.dSpeed);
-			}
+    }
+    
+    currDwell = 0;
+    currState = currCycle++ < CYCLE_COUNT ? RUN_STATE : RETURN_STATE;
+  }
+  else if(currState == RETURN_STATE) {
+    if(!getUpp) {
+      currState = STOP_STATE;
       break;
+    }
 
-		case HOLD_STATE:
-			if(cycleCount++ < HOLD_TIMEOUT && !(plate)) {
-        break;
-      }
-      cycleCount = 0;
-      currState = RETURN_STATE;
-	    break;
-
-		case RETURN_STATE:
-      if(!(upp_limit)) {
-        currState = STOP_STATE;
-				break;
-      }
-
-      if(encPos <= encDis) {
-        currState = RUN_STATE;
-      } else {
-				move_drill(UP, settings.dSpeed);
-			}
-      break;
-
-    case STOP_STATE: 
-      currState = IDLE_STATE;
-    case ERROR_STATE: 
-      toggle_drill(OFF);
-      toggle_water(OFF);
+    if(encPos <= encDis) {
+      currState = RUN_STATE;
+    } else {
+      move_drill(UP, settings.dSpeed);
+    }
+  }
+  else if(currState == STOP_STATE) {
+    currState = IDLE_STATE;
+    toggle_drill(OFF);
+    toggle_water(OFF);
+  }
+  else if(currState == ERROR_STATE) {
+    toggle_drill(OFF);
+    toggle_water(OFF);
+  }
+  else {
+    currState = IDLE_STATE;
   }
   
   nexLoop(nex_listen_list);
