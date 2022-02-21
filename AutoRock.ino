@@ -23,22 +23,25 @@
 #define  ON false
 #define OFF true
 
-#define   INIT_STATE 0
-#define   IDLE_STATE 1
-#define JOG_UP_STATE 2
-#define JOG_DN_STATE 3
-#define   HOME_STATE 4
-#define  SETUP_STATE 5
-#define  START_STATE 6
-#define    RUN_STATE 7
-#define   HOLD_STATE 8
-#define RETURN_STATE 9
-#define   STOP_STATE 10
-#define  ERROR_STATE 11
+enum States 
+{
+  INIT_STATE,
+  IDLE_STATE,
+  JOG_UP_STATE,
+  JOG_DN_STATE,
+  HOME_STATE,
+  SETUP_STATE,
+  START_STATE,
+  RUN_STATE,
+  HOLD_STATE,
+  RETURN_STATE,
+  STOP_STATE,
+  ERROR_STATE
+};
 
 /* Variable Declaration */
-uint16_t currState = INIT_STATE;
-uint16_t nextState = NULL;
+States currState = INIT_STATE;
+States nextState = INIT_STATE;
 
 #define ENC_DIS 6000
 volatile long encPos = 0;
@@ -135,6 +138,7 @@ void screen_init() {
 
   p1_h0.attachPop(p1_h0PopCallback);
   p1_h1.attachPop(p1_h1PopCallback);
+  p1_h2.attachPop(p1_h2PopCallback);
   p1_m0.attachPush(p1_m0PushCallback);
   p1_m1.attachPush(p1_m1PushCallback);
   p1_m2.attachPush(p1_m2PushCallback);
@@ -203,104 +207,116 @@ void loop() {
     currState = IDLE_STATE;
   }
 
-  if(currState == INIT_STATE) {
-    currState = IDLE_STATE;
-    delay(2000);
+  switch(currState)
+    case INIT_STATE:
+      currState = IDLE_STATE;
+      delay(2000);
 
-    p1.show();
-    p1_h0.setValue(settings.jSpeed);
-    p1_h1.setValue(settings.dSpeed);
-  } 
-  else if(currState == IDLE_STATE) {
-    ;
-  } 
-  else if(currState == JOG_UP_STATE) {
-    if(getUpp) move_drill(UP, settings.jSpeed);
-  } 
-  else if(currState == JOG_DN_STATE) {
-    if(getLow) move_drill(DOWN, settings.jSpeed);
-  } 
-  else if(currState == HOME_STATE) {
-    if(!getUpp) {
-      encPos = 0;
-      currState = nextState;
-    } else {
-      move_drill(UP, settings.dSpeed);
-    }
-  }
-  else if(currState == SETUP_STATE) {
-    toggle_drill(OFF);
-    toggle_water(OFF);
-    nextState = START_STATE;
-    currState = HOME_STATE;
-  }
-  else if(currState == START_STATE) {
-    if(!getLow || (encPos >= encMax)) {
-      currState = STOP_STATE;
+      p1.show();
+      p1_h0.setValue(settings.jSpeed);
+      p1_h1.setValue(settings.dSpeed);
       break;
-    }
+  
+    case IDLE_STATE:
+      break;
+    
+    case JOG_UP_STATE:
+      if(getUpp) move_drill(UP, settings.jSpeed);
+      break;
 
-    if(!getPlate) {
-      encDis = encPos - ENC_DIS;
-      currState = RETURN_STATE;
-    } else {
-      move_drill(DOWN, settings.dSpeed);
-    }
-  }
-  else if(currState == RUN_STATE) {
-    if(!getLow || (encPos >= encMax)) {
+    case JOG_DN_STATE:
+      if(getLow) move_drill(DOWN, settings.jSpeed);
+      break;
+
+    case HOME_STATE:
+      if(!getUpp) {
+        encPos = 0;
+        currState = nextState;
+      } else {
+        move_drill(UP, settings.dSpeed);
+      }
+      break;
+
+    case SETUP_STATE:
       toggle_drill(OFF);
       toggle_water(OFF);
-      
-      nextState = IDLE_STATE;
+      nextState = START_STATE;
       currState = HOME_STATE;
       break;
-    }
 
-    toggle_drill(ON);
-    toggle_water(ON);
+    case START_STATE:
+      if(!getLow || (encPos >= encMax)) {
+        currState = STOP_STATE;
+        break;
+      }
 
-    if(!getPlate) {
-      move_drill(DOWN, settings.dSpeed);
-      delay(100);
-      currState = HOLD_STATE;
-    } else {
-      move_drill(DOWN, settings.dSpeed);
-    }
-  }
-  else if(currState == HOLD_STATE) {
-    if(currDwell++ < settings.dwellTime && !getPlate) {
-      delay(100);
+      if(!getPlate) {
+        encDis = encPos - ENC_DIS;
+        currState = RETURN_STATE;
+      } else {
+        move_drill(DOWN, settings.dSpeed);
+      }
       break;
-    }
+
+    case RUN_STATE:
+      if(!getLow || (encPos >= encMax)) {
+        toggle_drill(OFF);
+        toggle_water(OFF);
+        
+        nextState = IDLE_STATE;
+        currState = HOME_STATE;
+        break;
+      }
+
+      toggle_drill(ON);
+      toggle_water(ON);
+
+      if(!getPlate) {
+        move_drill(DOWN, settings.dSpeed);
+        delay(100);
+        currState = HOLD_STATE;
+      } else {
+        move_drill(DOWN, settings.dSpeed);
+      }
+
+      break;
+
+    case HOLD_STATE:
+      if(currDwell++ < settings.dwellTime && !getPlate) {
+        delay(100);
+        break;
+      }
     
-    currDwell = 0;
-    currState = currCycle++ < CYCLE_COUNT ? RUN_STATE : RETURN_STATE;
-  }
-  else if(currState == RETURN_STATE) {
-    if(!getUpp) {
-      currState = STOP_STATE;
+      currDwell = 0;
+      currState = currCycle++ < CYCLE_COUNT ? RUN_STATE : RETURN_STATE;
       break;
-    }
 
-    if(encPos <= encDis) {
-      currState = RUN_STATE;
-    } else {
-      move_drill(UP, settings.dSpeed);
-    }
-  }
-  else if(currState == STOP_STATE) {
-    currState = IDLE_STATE;
-    toggle_drill(OFF);
-    toggle_water(OFF);
-  }
-  else if(currState == ERROR_STATE) {
-    toggle_drill(OFF);
-    toggle_water(OFF);
-  }
-  else {
-    currState = IDLE_STATE;
-  }
+    case RETURN_STATE:
+      if(!getUpp) {
+        currState = STOP_STATE;
+        break;
+      }
+
+      if(encPos <= encDis) {
+        currState = RUN_STATE;
+      } else {
+        move_drill(UP, settings.dSpeed);
+      }
+      break;
+
+    case STOP_STATE:
+      currState = IDLE_STATE;
+      toggle_drill(OFF);
+      toggle_water(OFF);
+      break;
+    
+    case ERROR_STATE:
+      toggle_drill(OFF);
+      toggle_water(OFF);
+      break;
+
+    case default:
+      currState = IDLE_STATE;
   
   nexLoop(nex_listen_list);
 }
